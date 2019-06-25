@@ -24,9 +24,13 @@
 
 #define HBW 10000000000ULL
 #define LBW 1000000000UL
+#define MTU 2500
+#define QL  60
 
-#define DT_NS 62100 
+#define DT_NS 101625000 
 #define DT_S 0
+
+//#define TIMING
 
 struct rtnl_handle rth;
 
@@ -36,7 +40,10 @@ int main(int argc, char * argv[]) {
   __u64 bws[] = {HBW, LBW};
   unsigned int index = 1;
 
-  //struct timespec tss, tsf;
+#ifdef TIMING
+  struct timespec tss, tsf;
+#endif
+
   struct timespec intime = {DT_S, DT_NS};
   struct timespec outtime;
 
@@ -87,12 +94,11 @@ int main(int argc, char * argv[]) {
   struct tc_tbf_qopt opt = {};
   __u32 rtab[256];
   __u32 ptab[256];
-  unsigned buffer = (10000000 >> 3) , mtu = 0, latency = 0;
+  unsigned buffer = (10000000 >> 3) , mtu = MTU, latency = 0;
   int Rcell_log =  -1, Pcell_log = -1;
   unsigned int linklayer = LINKLAYER_ETHERNET; /* Assume ethernet */
   struct rtattr *tail;
-  __u64 prate64 = 0;
-  opt.limit = 1500 * 60;
+  opt.limit = mtu * QL;
   opt.peakrate.rate = 0;
 
   opt.rate.mpu      = 0;
@@ -100,13 +106,16 @@ int main(int argc, char * argv[]) {
   
   while (1) {
     
-    //clock_gettime(CLOCK_REALTIME, &tss);
+#ifdef TIMING
+    clock_gettime(CLOCK_REALTIME, &tss);
+#endif
 
     req.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct tcmsg));
     addattr_l(n, sizeof(req), TCA_KIND, k, strlen(k)+1);
 
     rate64 = bws[(index^=1)] >> 3;
     opt.rate.rate = (rate64 >= (1ULL << 32)) ? ~0U : rate64;
+    opt.peakrate.rate = opt.rate.rate | (opt.rate.rate >> 4); 
 
     if (tc_calc_rtable(&opt.rate, rtab, Rcell_log, mtu, linklayer) < 0) {
       fprintf(stderr, "tbf: failed to calculate rate table.\n");
@@ -122,6 +131,12 @@ int main(int argc, char * argv[]) {
     if (rate64 >= (1ULL << 32))
       addattr_l(n, 2124, TCA_TBF_RATE64, &rate64, sizeof(rate64));
     addattr_l(n, 3024, TCA_TBF_RTAB, rtab, 1024);
+    if (opt.peakrate.rate) {
+      if (rate64 >= (1ULL << 32))
+        addattr_l(n, 3124, TCA_TBF_PRATE64, &rate64, sizeof(rate64));
+      addattr_l(n, 3224, TCA_TBF_PBURST, &mtu, sizeof(mtu));
+      addattr_l(n, 4096, TCA_TBF_PTAB, ptab, 1024);
+    }
     addattr_nest_end(n, tail);
 
     if (rtnl_talk(&rth, &req.n, NULL) < 0) {
@@ -129,10 +144,10 @@ int main(int argc, char * argv[]) {
       goto exit;
     }
 
-    /*
+#ifdef TIMING
     clock_gettime(CLOCK_REALTIME, &tsf);
     printf("Time: %ld\n", tsf.tv_nsec - tss.tv_nsec);
-    */
+#endif
 
     nanosleep(&intime, &outtime);
 

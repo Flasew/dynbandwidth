@@ -3,6 +3,7 @@
 
 all: 
 	gcc -O3 tbf_direct.c -L. -l:libnetlink.a -l:libtc.a -l:libutil.a -o tbf
+	gcc -O3 tbf_peak.c -L. -l:libnetlink.a -l:libtc.a -l:libutil.a -o tbfp
 	
 clean:
 	rm tbf
