@@ -25,8 +25,10 @@
 #define HBW 10000000000ULL
 #define LBW 1000000000UL
 
-#define DT_NS 62100 
+#define DT_NS 0
 #define DT_S 0
+
+//#define PRINT_TIME
 
 struct rtnl_handle rth;
 
@@ -36,8 +38,26 @@ int main(int argc, char * argv[]) {
   __u64 bws[] = {HBW, LBW};
   unsigned int index = 1;
 
-  //struct timespec tss, tsf;
-  struct timespec intime = {DT_S, DT_NS};
+  __u64 dt_s = DT_S;
+  __u64 dt_ns = DT_NS;
+
+  if (argc == 2) {
+    dt_s = 0;
+    dt_ns = 1000 * strtoull(argv[1], NULL, 10);
+  }
+  else if (argc == 3) {
+    dt_s = strtoull(argv[1], NULL, 10);
+    dt_ns = strtoull(argv[2], NULL, 10);
+  }
+  else if (argc != 1) {
+    fprintf(stderr, "Wrong number of arguments. \n");
+    exit(1);
+  }
+
+#ifdef PRINT_TIME
+  struct timespec tss, tsf;
+#endif
+  struct timespec intime = {dt_s, dt_ns};
   struct timespec outtime;
 
   int pid = getpid();
@@ -87,12 +107,12 @@ int main(int argc, char * argv[]) {
   struct tc_tbf_qopt opt = {};
   __u32 rtab[256];
   __u32 ptab[256];
-  unsigned buffer = (10000000 >> 3) , mtu = 0, latency = 0;
+  unsigned buffer = (50000) , mtu = 0, latency = 0;
   int Rcell_log =  -1, Pcell_log = -1;
   unsigned int linklayer = LINKLAYER_ETHERNET; /* Assume ethernet */
   struct rtattr *tail;
   __u64 prate64 = 0;
-  opt.limit = 1500 * 60;
+  opt.limit = 1514 * 60;
   opt.peakrate.rate = 0;
 
   opt.rate.mpu      = 0;
@@ -100,7 +120,9 @@ int main(int argc, char * argv[]) {
   
   while (1) {
     
-    //clock_gettime(CLOCK_REALTIME, &tss);
+#ifdef PRINT_TIME
+    clock_gettime(CLOCK_REALTIME, &tss);
+#endif
 
     req.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct tcmsg));
     addattr_l(n, sizeof(req), TCA_KIND, k, strlen(k)+1);
@@ -129,10 +151,10 @@ int main(int argc, char * argv[]) {
       goto exit;
     }
 
-    /*
+#ifdef PRINT_TIME
     clock_gettime(CLOCK_REALTIME, &tsf);
     printf("Time: %ld\n", tsf.tv_nsec - tss.tv_nsec);
-    */
+#endif
 
     nanosleep(&intime, &outtime);
 
