@@ -28,37 +28,11 @@
 #define DT_NS 0
 #define DT_S 0
 
-//#define PRINT_TIME
+#define PRINT_TIME
 
 struct rtnl_handle rth;
 
 int main(int argc, char * argv[]) {
-
-  __u64 rate64 = HBW;
-  __u64 bws[] = {HBW, LBW};
-  unsigned int index = 1;
-
-  __u64 dt_s = DT_S;
-  __u64 dt_ns = DT_NS;
-
-  if (argc == 2) {
-    dt_s = 0;
-    dt_ns = 1000 * strtoull(argv[1], NULL, 10);
-  }
-  else if (argc == 3) {
-    dt_s = strtoull(argv[1], NULL, 10);
-    dt_ns = strtoull(argv[2], NULL, 10);
-  }
-  else if (argc != 1) {
-    fprintf(stderr, "Wrong number of arguments. \n");
-    exit(1);
-  }
-
-#ifdef PRINT_TIME
-  struct timespec tss, tsf;
-#endif
-  struct timespec intime = {dt_s, dt_ns};
-  struct timespec outtime;
 
   int pid = getpid();
   struct sched_param param;
@@ -66,15 +40,16 @@ int main(int argc, char * argv[]) {
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
   sched_setscheduler(pid, SCHED_FIFO, &param);
 
+  __u64 rate64 = HBW;
+  __u64 bws[] = {HBW, LBW};
+  unsigned int index = 1;
+
+  __u64 dt_s = DT_S;
+  __u64 dt_ns = DT_NS;
+  __u64 lat_ms = 0;
+
   int ret = 0;
-  tc_core_init();
-
-  if (rtnl_open(&rth, 0) < 0) {
-    fprintf(stderr, "Cannot open rtnetlink\n");
-    exit(1);
-  }
-
-  // tc_qdisc.c
+  int ignore;
 
   char  d[IFNAMSIZ] = "enp1s0";
   char  k[FILTER_NAMESZ] = "tbf";
@@ -88,6 +63,55 @@ int main(int argc, char * argv[]) {
     .t.tcm_family = AF_UNSPEC,
   };
 
+  if (argc == 2) {
+    dt_s = 0;
+    dt_ns = 1000 * strtoull(argv[1], NULL, 10);
+  }
+  else if (argc == 3) {
+    dt_s = 0;
+    dt_ns = 1000 * strtoull(argv[1], NULL, 10);
+    lat_ms = strtoull(argv[2], NULL, 10);
+  }
+  else if (argc == 4) {
+    dt_s = strtoull(argv[1], NULL, 10);
+    dt_ns = strtoull(argv[2], NULL, 10);
+    lat_ms = strtoull(argv[3], NULL, 10);
+  }
+  else if (argc != 1) {
+    fprintf(stderr, "Wrong number of arguments. \n");
+    exit(1);
+  }
+
+#ifdef PRINT_TIME
+  struct timespec tss, tsf;
+#endif
+  struct timespec intime = {dt_s, dt_ns};
+  struct timespec outtime;
+
+  ignore = system("/sbin/tc qdisc del dev enp1s0 root");
+
+  if (lat_ms != 0) {
+    char buf[1024] = {};
+    snprintf(buf, 1024, "/sbin/tc qdisc add dev enp1s0 root handle 1:0 netem delay %llums", lat_ms);
+    ignore = system(buf);
+    ignore = system("tc qdisc add dev enp1s0 parent 1:1 handle 10: tbf rate 5.5Gbit burst 48750b lat 66us");
+    req.t.tcm_parent = 0x00010001U;
+    req.t.tcm_handle = 0x00100000U;
+  }
+  else {
+    ignore = system("tc qdisc add dev enp1s0 root tbf rate 5.5Gbit burst 48750b lat 66us");
+    req.t.tcm_parent = TC_H_ROOT;
+  }
+
+  tc_core_init();
+
+  if (rtnl_open(&rth, 0) < 0) {
+    fprintf(stderr, "Cannot open rtnetlink\n");
+    exit(1);
+  }
+
+  // tc_qdisc.c
+
   if (d[0])  {
     int idx;
 
@@ -98,8 +122,6 @@ int main(int argc, char * argv[]) {
       return -nodev(d);
     req.t.tcm_ifindex = idx;
   }
-
-  req.t.tcm_parent = TC_H_ROOT;
 
   // q_tbf.c
   struct nlmsghdr * n = &req.n;
