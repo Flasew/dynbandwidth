@@ -26,7 +26,7 @@
 #define LAT 1
 #define PER 2
 
-// #define PRINT_TIME
+#define PRINT_TIME
 
 struct bw_param {
   __u64 bandwidth;
@@ -46,7 +46,6 @@ int main(int argc, char * argv[]) {
 
   int nbws;
 
-  __u64 rate64;
   struct bw_param * bws;
   unsigned int index = 0;
 
@@ -76,10 +75,10 @@ int main(int argc, char * argv[]) {
   };
 
   argc--; argv++;
-  ql = strtoull(argv, NULL, 10);   argc--; argv++;
-  nbws = strtoull(argv, NULL, 10); argc--; argv++;
+  ql = strtoull(*argv, NULL, 10);   argc--; argv++;
+  nbws = strtoull(*argv, NULL, 10); argc--; argv++;
 
-  if ((unsigned)argc != bws * 3) {
+  if ((unsigned)argc != nbws * 3) {
     fprintf(stderr, "Wrong number of arguments. \n");
     exit(1);
   }
@@ -88,13 +87,13 @@ int main(int argc, char * argv[]) {
   for (unsigned int i = 0; i < nbws; i++) {
     
     __u64 t_ns; 
-    bw_param[i][BW] = strtoull(argv, NULL, 10);    argc--; argv++;
-    bw_param[i][BW] >>= 3;
-    bw_param[i][LAT] = strtoull(argv, NULL, 10);   argc--; argv++;
-    t_ns = strtoull(argv, NULL, 10) * 1000;        argc--; argv++;
+    bws[i].bandwidth = strtoull(*argv, NULL, 10);    argc--; argv++;
+    bws[i].bandwidth >>= 3;
+    bws[i].delay = strtoull(*argv, NULL, 10);   argc--; argv++;
+    t_ns = strtoull(*argv, NULL, 10) * 1000;        argc--; argv++;
     
-    bw_param[i][PER].tv_sec = t_ns / 1000000000ULL;
-    bw_param[i][PER].tv_nsec = t_ns - dt_s * 1000000000ULL;
+    bws[i].period.tv_sec = t_ns / 1000000000ULL;
+    bws[i].period.tv_nsec = t_ns - bws[i].period.tv_sec * 1000000000ULL;
     // printf("s: %llu, ns: %llu\n", dt_s, dt_ns);
 
   }
@@ -123,8 +122,8 @@ int main(int argc, char * argv[]) {
   idx1 = ll_name_to_index(d1);
   idx2 = ll_name_to_index(d2);
 
-  int dist_size = 0;
-  int slot_dist_size = 0;
+  struct nlmsghdr * n = &req.n;
+
   struct rtattr *tail;
   struct tc_netem_qopt opt = { .limit = ql };
   struct tc_netem_rate rate = {};
@@ -141,10 +140,13 @@ int main(int argc, char * argv[]) {
     addattr_l(n, sizeof(req), TCA_KIND, k, strlen(k)+1);
     tail = NLMSG_TAIL(n);
 
-    index = (index + 1) % nbws;
-    opt.latency = tc_core_time2tick(bws[index][LAT]);
 
-    rate64 = bws[index][BW] >> 3;
+    index = (index + 1) % nbws;
+    opt.latency = tc_core_time2tick(bws[index].delay);
+
+    addattr_l(n, 1024, TCA_OPTIONS, &opt, sizeof(opt));
+
+    rate64 = bws[index].bandwidth;
     if (rate64 >= (1ULL << 32)) {
       addattr_l(n, 1024, TCA_NETEM_RATE64, &rate64, sizeof(rate64));
       rate.rate = ~0U;
@@ -188,7 +190,7 @@ int main(int argc, char * argv[]) {
     printf("Time: %ld\n", tsf.tv_nsec - tss.tv_nsec);
 #endif
 
-    nanosleep(&(bws[index][PER]), &outtime);
+    nanosleep(&(bws[index].period), &outtime);
 
   }
 
