@@ -2330,6 +2330,7 @@ static void DBGUNDO(struct sock *sk, const char *msg)
 
 static void tcp_undo_cwnd_reduction(struct sock *sk, bool unmark_loss)
 {
+	return;
 	struct tcp_sock *tp = tcp_sk(sk);
 
 	if (unmark_loss) {
@@ -2359,12 +2360,13 @@ static void tcp_undo_cwnd_reduction(struct sock *sk, bool unmark_loss)
 
 static inline bool tcp_may_undo(const struct tcp_sock *tp)
 {
-	return tp->undo_marker && (!tp->undo_retrans || tcp_packet_delayed(tp));
+	return false;
 }
 
 /* People celebrate: "We love our President!" */
 static bool tcp_try_undo_recovery(struct sock *sk)
 {
+	return false;
 	struct tcp_sock *tp = tcp_sk(sk);
 
 	if (tcp_may_undo(tp)) {
@@ -2400,6 +2402,7 @@ static bool tcp_try_undo_recovery(struct sock *sk)
 /* Try to undo cwnd reduction, because D-SACKs acked all retransmitted data */
 static bool tcp_try_undo_dsack(struct sock *sk)
 {
+	return false;
 	struct tcp_sock *tp = tcp_sk(sk);
 
 	if (tp->undo_marker && !tp->undo_retrans) {
@@ -2416,6 +2419,7 @@ static bool tcp_try_undo_dsack(struct sock *sk)
 /* Undo during loss recovery after partial ACK or using F-RTO. */
 static bool tcp_try_undo_loss(struct sock *sk, bool frto_undo)
 {
+	return false;
 	struct tcp_sock *tp = tcp_sk(sk);
 
 	if (frto_undo || tcp_may_undo(tp)) {
