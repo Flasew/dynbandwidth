@@ -1,0 +1,1 @@
+{"summary":{"bytes":4371843968,"errors":{"write":0,"read":0,"status":0,"timeout":0,"connect":0},"duration":2099413,"requests":47164},"latency":{"max":1835,"stddev":128.33290289633,"q3":411,"q1":258,"min":148,"avg":350.94390388358}}
