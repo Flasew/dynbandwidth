@@ -46,6 +46,8 @@ struct nfq_config {
   int fd;
   struct nfq_handle * handler; 
   struct nfq_q_handle * queue;
+
+  struct nfq_flowbuf * reorder_buf[65536];
   
   pthread_mutex_t lock;                   
   pthread_mutexattr_t l_attr;
