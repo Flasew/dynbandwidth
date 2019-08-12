@@ -1,15 +1,13 @@
-import random
+import numpy as np
 from sanic import Sanic
 from sanic.response import json, text
 
-texts=[text('a'*(500*(2**i))) for i in range(10)]
-#texts=['a'*1000000]
-
 app = Sanic()
+
 
 @app.route('/')
 async def test(request):
-    return random.choice(texts)
+    return text('a'*int(max(min(np.random.normal(100000, 25000), 512000), 512)))
 
 if __name__ == "__main__":
     app.run(host='10.0.1.6', port=8000, workers=8, access_log=False)
