@@ -110,18 +110,18 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
 
   struct nfq_flowbuf * fbuf = NULL;
 
-  if (nfq->reorder_buf[sport] == NULL) {
+  if (nfq.reorder_buf[sport] == NULL) {
     fbuf = calloc(sizeof(struct nfq_flowbuf), 1);
-    nfq->reorder_buf[sport] = fbuf;
+    nfq.reorder_buf[sport] = fbuf;
     fbuf->reorder_buf[sport] = sport; 
     fbuf->reorder_buf[dport] = dport; 
-    fbuf->sfifo = RB_ROOT_CACHED;
+    fbuf->root = RB_ROOT;
     fbuf->last_activity = ev_now (EV_A);
-    ev_init(&buf->timer, callback);
-    callback(EV_A_ &buf->timer, 0);
+    ev_init(&fbuf->timer, timer_cb);
+    timer_cb(EV_A_ &fbuf->timer, 0);
   }
   else {
-    struct nfq_flowbuf * curr = nfq->reorder_buf[sport];
+    struct nfq_flowbuf * curr = nfq.reorder_buf[sport];
     struct nfq_flowbuf * tail = curr; 
     while (curr) {
       if (curr->dport == dport) {
@@ -137,10 +137,10 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
       tail->next = fbuf;
       fbuf->reorder_buf[sport] = sport; 
       fbuf->reorder_buf[dport] = dport; 
-      fbuf->root = RB_ROOT_CACHED;
+      fbuf->root = RB_ROOT;
       fbuf->last_activity = ev_now (EV_A);
-      ev_init(&buf->timer, callback);
-      callback(EV_A_ &buf->timer, 0);
+      ev_init(&fbuf->timer, timer_cb);
+      timer_cb(EV_A_ &fbuf->timer, 0);
     }
   }
 
@@ -161,11 +161,11 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
     fbuf->expected_next = seq + psize;
     fbuf->last_activity = ev_now(EV_A);
 
-    struct rb_node * node = rb_first_cached(&(fbuf->root));
+    struct rb_node * node = rb_first(&(fbuf->root));
 
     while (node && rb_entry(node, struct nfq_flowdata, seq) == fbuf->expected_next) {
       send_packet_at(queue, fbuf, node, TRUE);
-      node = rb_first_cached(&(fbuf->root));
+      node = rb_first(&(fbuf->root));
     }
 
     return 1;
@@ -196,12 +196,12 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
   // end
   
   else {
-    struct rb_node * first_node = rb_first_cached(&(fbuf->root));
+    struct rb_node * first_node = rb_first(&(fbuf->root));
     uint32_t lowest_seq = rb_entry(first_node, struct nfq_flowdata, seq);
 
     if (lowest_seq <= seq) {
 
-      send_packet_at(queue, fbuf, first_node, FALSE);
+      send_packet_at(queue, fbuf, first_node);
       insert_or_send_packet(queue, fbuf, seq, id, psize);
       
     }
@@ -287,11 +287,10 @@ static inline int insert_or_send_packet(struct nfq_q_handle * queue,
   newdata->packet_id = packet_id;
   newdata->seg_size = seg_size;
 
-  struct rb_node * currfirst = rb_first_cached(&(fbuf->root));
+  struct rb_node * currfirst = rb_first(&(fbuf->root));
   /* Add new_node node and rebalance tree. */
   rb_link_node(&newdata->node, parent, new_node);
-  rb_insert_color_cached(&newdata->node, &(fbuf->root), 
-    !currfirst || seq < rb_entry(currfirst, struct nfq_flowdata, seq));
+  rb_insert_color(&newdata->node, &(fbuf->root));
   fbuf->last_activity = ev_now(EV_A);
 
   return ret;
@@ -309,7 +308,7 @@ static inline int send_packet_at(struct nfq_q_handle * queue,
   fbuf->expected_next = 
     rb_entry(node, struct nfq_flowdata, seq) + rb_entry(node, struct nfq_flowdata, seg_size);
 
-  rb_erase_cached(rb_node, &(fbuf->root));
+  rb_erase(rb_node, &(fbuf->root));
   free(container_of(rb_node, struct nfq_flowdata, node));
   fbuf->last_activity = ev_now(EV_A);
   fbuf->size--;
@@ -318,12 +317,12 @@ static inline int send_packet_at(struct nfq_q_handle * queue,
 
 static int empty_and_destroy_buf(struct nfq_q_handle * queue, struct nfq_flowbuf * fbuf) {
 
-  struct rb_node * node = rb_first_cached(&(fbuf->root));
+  struct rb_node * node = rb_first(&(fbuf->root));
   int ret = 1;
 
   while (node) {
-    ret &= send_packet_at(queue, fbuf, node, TRUE);
-    node = rb_first_cached(&(fbuf->root));
+    ret &= send_packet_at(queue, fbuf, node);
+    node = rb_first(&(fbuf->root));
   }
 
   struct nfq_flowbuf * myprev = fbuf->prev;
