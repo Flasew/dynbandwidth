@@ -1,5 +1,7 @@
 #include "nfqueue.h"
 
+struct nfq_config nfq;
+
 int main(int argc, char * argv[]) {
   
   int len;
@@ -9,15 +11,15 @@ int main(int argc, char * argv[]) {
   if (nfq_init(nfq) < 0) 
     exit(1);
 
-  pthread_create(&(n->verd_thread), &(n->attr), run_verd, &nfq);
-  pthread_create(&(n->tout_thread), &(n->attr), run_tout, &nfq);
+  // pthread_create(&(n->verd_thread), &(n->attr), run_verd, &nfq);
+  // pthread_create(&(n->tout_thread), &(n->attr), run_tout, &nfq);
 
   int pid = getpid();
   struct sched_param param;
   memset(&param, 0, sizeof(param));
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
   sched_setscheduler(pid, SCHED_FIFO, &param);
-  pthread_setschedparam(n->verd_thread, SCHED_FIFO, &param);
+  // pthread_setschedparam(n->verd_thread, SCHED_FIFO, &param);
 
   memset(buffer, 0, PBUF_SIZ);
 
@@ -71,39 +73,272 @@ int nfq_init(struct nfq_config * n) {
     return -1;
   }
 
-  pthread_attr_init(&(n->attr));
-  pthread_attr_setdetachstate(&(n->attr), PTHREAD_CREATE_JOINABLE);
-  pthread_attr_setscope(&(n->attr), PTHREAD_SCOPE_SYSTEM);
+  // pthread_attr_init(&(n->attr));
+  // pthread_attr_setdetachstate(&(n->attr), PTHREAD_CREATE_JOINABLE);
+  // pthread_attr_setscope(&(n->attr), PTHREAD_SCOPE_SYSTEM);
 
-  pthread_mutexattr_init(&(n->l_attr));
-  pthread_mutexattr_settype(&(n->l_attr), PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutex_init(&(n->lock), &(n->l_attr));
+  // pthread_mutexattr_init(&(n->l_attr));
+  // pthread_mutexattr_settype(&(n->l_attr), PTHREAD_MUTEX_RECURSIVE);
+  // pthread_mutex_init(&(n->lock), &(n->l_attr));
 
   return 0;
 }
 
 
-void run_verd(void * data) {
-}
-void run_tout(void * data){
-}
+// void run_verd(void * data) {
+// }
+// void run_tout(void * data){
+// }
 
 int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *data) {
 
   struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr(nfad);
   uint32_t id = ntohl(ph->packet_id);
-  unsigned char * data = NULL;
-  int len = nfq_get_payload(nfad, &buffer);
 
-  struct iphdr * ip = (struct iphdr*)(buffer);
-  struct tcphdr * tcp = (struct tcphdr*)(buffer + 4*(unsigned int)ip->ihl);
+  unsigned char * packet = NULL;
+  int len = nfq_get_payload(nfad, &packet);
+
+  // struct nfq_config * nfq = (struct nfq_config *)data;
+
+  struct iphdr * ip = (struct iphdr*)(packet);
+  struct tcphdr * tcp = (struct tcphdr*)(packet + 4*(unsigned int)ip->ihl);
 
   uint16_t sport = ntohs(tcp->th_sport);
+  uint16_t dport = ntohs(tcp->th_dport);
+  uint16_t psize = ntohs(ip->tot_len) - ((unsigned int)ip->ihl + tcp->th_off) * 4;
+  uint32_t seq   = ntohl(tcp->th_seq);
 
-  print_iphdr(buffer);
-  print_tcphdr(buffer + sizeof(struct iphdr));
+  struct nfq_flowbuf * fbuf = NULL;
 
-  return nfq_set_verdict(queue, ntohl(ph->packet_id), NF_ACCEPT, 0, NULL);
+  if (nfq->reorder_buf[sport] == NULL) {
+    fbuf = calloc(sizeof(struct nfq_flowbuf), 1);
+    nfq->reorder_buf[sport] = fbuf;
+    fbuf->reorder_buf[sport] = sport; 
+    fbuf->reorder_buf[dport] = dport; 
+    fbuf->sfifo = RB_ROOT_CACHED;
+    fbuf->last_activity = ev_now (EV_A);
+    ev_init(&buf->timer, callback);
+    callback(EV_A_ &buf->timer, 0);
+  }
+  else {
+    struct nfq_flowbuf * curr = nfq->reorder_buf[sport];
+    struct nfq_flowbuf * tail = curr; 
+    while (curr) {
+      if (curr->dport == dport) {
+        fbuf = curr;
+        break;
+      }
+      tail = curr;
+      curr = curr->next; 
+    }
+    if (!fbuf) {
+      fbuf = calloc(sizeof(struct nfq_flowbuf), 1);
+      fbuf->prev = tail;
+      tail->next = fbuf;
+      fbuf->reorder_buf[sport] = sport; 
+      fbuf->reorder_buf[dport] = dport; 
+      fbuf->root = RB_ROOT_CACHED;
+      fbuf->last_activity = ev_now (EV_A);
+      ev_init(&buf->timer, callback);
+      callback(EV_A_ &buf->timer, 0);
+    }
+  }
+
+  // Lowest First Resequencing Algorithm
+  
+  // IF (expected_num equals current_packet_num)
+  // begin
+  //   Release packet into output queue.
+  //   Increment expected_num by 1
+  //   While (expected_num in resequencing buffer)
+  //     {Release that packet into output queue
+  //     Increment expected_num by 1}
+  // end
+
+  else if (before(seq, fbuf->expected_next) || seq == fbuf->expected_next) {
+
+    nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
+    fbuf->expected_next = seq + psize;
+    fbuf->last_activity = ev_now(EV_A);
+
+    struct rb_node * node = rb_first_cached(&(fbuf->root));
+
+    while (node && rb_entry(node, struct nfq_flowdata, seq) == fbuf->expected_next) {
+      send_packet_at(queue, fbuf, node, TRUE);
+      node = rb_first_cached(&(fbuf->root));
+    }
+
+    return 1;
+  }
+
+  // ELSE IF(re-sequencing buffer is not full)
+  // begin
+  //   Store packet in re-sequencing buffer
+  // end
+  else if (fbuf->size < FBUF_SIZ) {
+    
+    return insert_or_send_packet(queue, fbuf, seq, id, psize);
+
+  }
+
+  // ELSE // re-sequencing buffer is full
+  // begin
+  //   Select packet in buffer with lowest sequence number.
+  //   IF (selected_packet_num less than current_packet_num) 
+  //   begin
+  //     Release selected packet into the output queue.
+  //     Store current packet in the buffer.
+  //   end
+  //   ELSE
+  //   begin
+  //     Release current packet into the output queue.
+  //   end 
+  // end
+  
+  else {
+    struct rb_node * first_node = rb_first_cached(&(fbuf->root));
+    uint32_t lowest_seq = rb_entry(first_node, struct nfq_flowdata, seq);
+
+    if (lowest_seq <= seq) {
+
+      send_packet_at(queue, fbuf, first_node, FALSE);
+      insert_or_send_packet(queue, fbuf, seq, id, psize);
+      
+    }
+
+    else {
+
+      nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
+      fbuf->last_activity = ev_now(EV_A);
+
+    }
+  }
+
+  // print_iphdr(ip);
+  // print_tcphdr(tcp);
+
+  return -1;
+
+}
+
+static void timer_cb (EV_P_ ev_timer *w, int revents) {
+  // calculate when the timeout would happen
+  struct nfq_flowbuf * fbuf = (struct nfq_flowbuf *)w->data;
+  ev_tstamp after = fbuf->last_activity - ev_now (EV_A) + fbuf->timeout;
+ 
+  // if negative, it means we the timeout already occurred
+  if (after < 0.) {
+    // timeout occurred, take action
+    empty_buf(fbuf);
+  }
+
+  else {
+    // callback was invoked, but there was some recent 
+    // activity. simply restart the timer to time out
+    // after "after" seconds, which is the earliest time
+    // the timeout can occur.
+    ev_timer_set (w, after, 0.);
+    ev_timer_start (EV_A_ w);
+  }
+}
+
+static inline int insert_or_send_packet(struct nfq_q_handle * queue, 
+                             struct nfq_flowbuf * fbuf, 
+                             uint32_t seq, 
+                             uint32_t packet_id,
+                             uint16_t seg_size) 
+{
+  struct rb_node **new_node = &(fbuf->root->rb_node), *parent = NULL;
+
+  // Figure out where to put new_node node 
+  // if this sequence number somehow collide with an existing one, 
+  // let this one out. 
+  while (*new_node) {
+    struct nfq_flowdata *curr = container_of(*new_node, struct nfq_flowdata, node);
+
+    parent = *new_node;
+    if (before(seq, curr->seq))
+      new_node = &((*new_node)->rb_left);
+    else if (after(seq, curr->seq))
+      new_node = &((*new_node)->rb_right);
+
+    // retransmit. leave the larger or newer packet...
+    else {
+      int ret;
+      if (curr->seg_size > seg_size) {
+        ret = nfq_set_verdict(queue, packet_id, NF_DROP, 0, NULL);
+      }
+      else {
+        uint32_t oldid = curr->packet_id;
+        curr->packet_id = packet_id;
+        curr->seg_size =  seg_size;
+        ret = nfq_set_verdict(queue, oldid, NF_DROP, 0, NULL);
+      }
+      fbuf->last_activity = ev_now(EV_A);
+      return ret;
+    }
+  }
+
+  // do insertion
+
+  fbuf->size++;
+  struct nfq_flowdata * newdata = calloc(sizeof(struct nfq_flowdata), 1);
+  newdata->seq = seq;
+  newdata->packet_id = packet_id;
+  newdata->seg_size = seg_size;
+
+  struct rb_node * currfirst = rb_first_cached(&(fbuf->root));
+  /* Add new_node node and rebalance tree. */
+  rb_link_node(&newdata->node, parent, new_node);
+  rb_insert_color_cached(&newdata->node, &(fbuf->root), 
+    !currfirst || seq < rb_entry(currfirst, struct nfq_flowdata, seq));
+  fbuf->last_activity = ev_now(EV_A);
+
+  return ret;
+
+}
+
+static inline int send_packet_at(struct nfq_q_handle * queue, 
+                                 struct nfq_flowbuf * fbuf, 
+                                 struct rb_node * rb_node) 
+{
+  int ret = nfq_set_verdict(queue,
+                            rb_entry(rb_node, struct nfq_flowdata, packet_id),
+                            NF_ACCEPT, 0, NULL);
+
+  fbuf->expected_next = 
+    rb_entry(node, struct nfq_flowdata, seq) + rb_entry(node, struct nfq_flowdata, seg_size);
+
+  rb_erase_cached(rb_node, &(fbuf->root));
+  free(container_of(rb_node, struct nfq_flowdata, node));
+  fbuf->last_activity = ev_now(EV_A);
+  fbuf->size--;
+  return ret;
+}
+
+static int empty_and_destroy_buf(struct nfq_q_handle * queue, struct nfq_flowbuf * fbuf) {
+
+  struct rb_node * node = rb_first_cached(&(fbuf->root));
+  int ret = 1;
+
+  while (node) {
+    ret &= send_packet_at(queue, fbuf, node, TRUE);
+    node = rb_first_cached(&(fbuf->root));
+  }
+
+  struct nfq_flowbuf * myprev = fbuf->prev;
+  struct nfq_flowbuf * mynext = fbuf->next;
+
+  if (myprev) 
+    myprev->next = mynext;
+  else 
+    nfq.reorder_buf[fbuf->sport] = mynext;
+
+  if (mynext)
+    mynext->prev = myprev;
+
+  return ret;
+
 }
 
 static void print_iphdr(unsigned char * buffer) {
