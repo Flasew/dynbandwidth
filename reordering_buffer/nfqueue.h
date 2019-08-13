@@ -39,7 +39,7 @@ struct nfq_flowbuf {
   uint32_t expected_next;
   struct nfq_flowbuf * prev;
   struct nfq_flowbuf * next;
-  struct rb_root_cached root;
+  struct rb_root root;
   ev_tstamp timeout;
   ev_tstamp last_activity; // time of last activity
   ev_timer timer;

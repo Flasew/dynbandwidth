@@ -1,6 +1,7 @@
 #include "nfqueue.h"
 
 struct nfq_config nfq;
+struct ev_loop *loop;
 
 int main(int argc, char * argv[]) {
   
@@ -8,7 +9,7 @@ int main(int argc, char * argv[]) {
   char buffer[PBUF_SIZ];
   struct nfq_config nfq;
 
-  if (nfq_init(nfq) < 0) 
+  if (nfq_init(&nfq) < 0) 
     exit(1);
 
   // pthread_create(&(n->verd_thread), &(n->attr), run_verd, &nfq);
@@ -20,12 +21,17 @@ int main(int argc, char * argv[]) {
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
   sched_setscheduler(pid, SCHED_FIFO, &param);
   // pthread_setschedparam(n->verd_thread, SCHED_FIFO, &param);
+  // 
+  loop = EV_DEFAULT;
+  ev_run (loop, 0);
 
   memset(buffer, 0, PBUF_SIZ);
 
-  while ((len = read(fd, buffer, PBUF_SIZ)) > 0) {
-    nfq_handle_packet(handler, buffer, len);
+  while ((len = read(nfq.fd, buffer, PBUF_SIZ)) > 0) {
+    nfq_handle_packet(nfq.handler, buffer, len);
   }
+
+
 
   return 0;
 
@@ -43,8 +49,8 @@ int nfq_init(struct nfq_config * n) {
     return -1;
   }
   
-  n->queue = nfq_create_queue(handler, 0, nfq_cb, NULL);
-  if (!queue) {
+  n->queue = nfq_create_queue(n->handler, 0, nfq_cb, NULL);
+  if (!n->queue) {
     fprintf(stderr, "Error: cannot create queue\n");
     return -1;
   }
@@ -113,8 +119,8 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
   if (nfq.reorder_buf[sport] == NULL) {
     fbuf = calloc(sizeof(struct nfq_flowbuf), 1);
     nfq.reorder_buf[sport] = fbuf;
-    fbuf->reorder_buf[sport] = sport; 
-    fbuf->reorder_buf[dport] = dport; 
+    fbuf->sport = sport; 
+    fbuf->dport = dport; 
     fbuf->root = RB_ROOT;
     fbuf->last_activity = ev_now (EV_A);
     ev_init(&fbuf->timer, timer_cb);
@@ -135,8 +141,8 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
       fbuf = calloc(sizeof(struct nfq_flowbuf), 1);
       fbuf->prev = tail;
       tail->next = fbuf;
-      fbuf->reorder_buf[sport] = sport; 
-      fbuf->reorder_buf[dport] = dport; 
+      fbuf->sport = sport; 
+      fbuf->dport = dport; 
       fbuf->root = RB_ROOT;
       fbuf->last_activity = ev_now (EV_A);
       ev_init(&fbuf->timer, timer_cb);
