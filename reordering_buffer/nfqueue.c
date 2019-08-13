@@ -168,11 +168,9 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
     fbuf->last_activity = ev_now(EV_A);
 
     struct rb_node * node = rb_first(&(fbuf->root));
-    uint32_t * temp_p = rb_entry(node, struct nfq_flowdata, seq);
-    while (node && *temp_p == fbuf->expected_next) {
+    while (node && rb_entry(node, struct nfq_flowdata, node)->seq == fbuf->expected_next) {
       send_packet_at(queue, fbuf, node);
       node = rb_first(&(fbuf->root));
-      temp_p = rb_entry(node, struct nfq_flowdata, seq);
     }
 
     return 1;
@@ -204,8 +202,7 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
   
   else {
     struct rb_node * first_node = rb_first(&(fbuf->root));
-    uint32_t * temp_p = rb_entry(first_node, struct nfq_flowdata, seq);
-    uint32_t lowest_seq = *temp_p;
+    uint32_t lowest_seq = rb_entry(first_node, struct nfq_flowdata, node)->seq;
 
     if (lowest_seq <= seq) {
 
@@ -309,15 +306,12 @@ static inline int send_packet_at(struct nfq_q_handle * queue,
                                  struct nfq_flowbuf * fbuf, 
                                  struct rb_node * rb_node) 
 {
-  uint32_t * temp_p = rb_entry(rb_node, struct nfq_flowdata, packet_id);
+  struct flowdata * fdata = rb_entry(rb_node, struct nfq_flowdata, node);
   int ret = nfq_set_verdict(queue,
-                            *temp_p,
+                            fdata->packet_id,
                             NF_ACCEPT, 0, NULL);
 
-  temp_p = rb_entry(rb_node, struct nfq_flowdata, seq);
-  fbuf->expected_next = *temp_p;
-  temp_p = rb_entry(rb_node, struct nfq_flowdata, seg_size);
-  fbuf->expected_next += *temp_p;
+  fbuf->expected_next = fdata->seq + fdata->seg_size;
 
   rb_erase(rb_node, &(fbuf->root));
   free(container_of(rb_node, struct nfq_flowdata, node));
