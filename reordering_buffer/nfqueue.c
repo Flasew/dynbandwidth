@@ -41,7 +41,7 @@ int nfq_init(struct nfq_config * n) {
 
   int ret;
 
-  memset(n, 0, sizeof(struct nfg_config));
+  memset(n, 0, sizeof(struct nfq_config));
 
   n->handler = nfq_open();    
   if (!n->handler) {

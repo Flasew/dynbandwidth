@@ -32,6 +32,12 @@
 #define FBUF_SIZ 512
 #define FBUF_TOUT 1.0
 
+static inline bool before(__u32 seq1, __u32 seq2)
+{
+        return (__s32)(seq1-seq2) < 0;
+}
+#define after(seq2, seq1)   before(seq1, seq2)
+
 struct nfq_flowbuf {
   uint16_t sport;
   uint16_t dport;
