@@ -24,8 +24,8 @@
 #include <libnetfilter_queue/libnetfilter_queue_tcp.h>
 
 #include <pthread.h>
-#include <rbtree/rbtree.h>
 #include <ev.h>
+#include "rbtree.h"
 
 #define PBUF_SIZ 0xffff
 #define MAX_QL 32768

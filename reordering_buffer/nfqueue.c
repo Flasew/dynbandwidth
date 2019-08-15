@@ -1,5 +1,7 @@
 #include "nfqueue.h"
 
+#define DEBUG 1
+
 struct nfq_config nfq;
 struct ev_loop *loop;
 
@@ -101,6 +103,9 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
   struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr(nfad);
   uint32_t id = ntohl(ph->packet_id);
 
+  if (DEBUG) 
+    fprintf(stderr, "Received packet with id %u\n", id);
+
   unsigned char * packet = NULL;
   int len = nfq_get_payload(nfad, &packet);
 
@@ -108,6 +113,19 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
 
   struct iphdr * ip = (struct iphdr*)(packet);
   struct tcphdr * tcp = (struct tcphdr*)(packet + 4*(unsigned int)ip->ihl);
+  
+  if (DEBUG) {
+    print_iphdr((unsigned char *)ip);
+    print_tcphdr((unsigned char *)tcp);
+  }
+
+  /*
+    if (DEBUG) {
+      fprintf(stderr, "Verdicted packet %u\n", id);
+    }
+
+  return  nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
+  */
 
   uint16_t sport = ntohs(tcp->th_sport);
   uint16_t dport = ntohs(tcp->th_dport);
@@ -117,13 +135,16 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
   struct nfq_flowbuf * fbuf = NULL;
 
   if (nfq.reorder_buf[sport] == NULL) {
+     
     fbuf = calloc(sizeof(struct nfq_flowbuf), 1);
     nfq.reorder_buf[sport] = fbuf;
     fbuf->sport = sport; 
     fbuf->dport = dport; 
     fbuf->root = RB_ROOT;
+    fbuf->expected_next = seq;
     fbuf->last_activity = ev_now (EV_A);
     ev_init(&fbuf->timer, timer_cb);
+    fbuf->timer.data = fbuf;
     timer_cb(EV_A_ &fbuf->timer, 0);
   }
   else {
@@ -144,6 +165,7 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
       fbuf->sport = sport; 
       fbuf->dport = dport; 
       fbuf->root = RB_ROOT;
+    fbuf->expected_next = seq;
       fbuf->last_activity = ev_now (EV_A);
       ev_init(&fbuf->timer, timer_cb);
       timer_cb(EV_A_ &fbuf->timer, 0);
@@ -163,8 +185,16 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
 
   if (before(seq, fbuf->expected_next) || seq == fbuf->expected_next) {
 
+    if (DEBUG) {
+      fprintf(stderr, "CASE seq <= expected, seq = %u, exp = %u\n", seq, fbuf->expected_next);
+      fprintf(stderr, "Verdicted packet %u\n", id);
+    }
+
     nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
-    fbuf->expected_next = seq + psize;
+    if (tcp->th_flags & TH_SYN)
+      fbuf->expected_next = seq + 1;
+    else
+      fbuf->expected_next = seq + psize;
     fbuf->last_activity = ev_now(EV_A);
 
     struct rb_node * node = rb_first(&(fbuf->root));
@@ -172,6 +202,9 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
       send_packet_at(queue, fbuf, node);
       node = rb_first(&(fbuf->root));
     }
+
+    if (DEBUG) 
+      fprintf(stderr, "CASE seq <= expected END \n");
 
     return 1;
   }
@@ -181,8 +214,14 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
   //   Store packet in re-sequencing buffer
   // end
   else if (fbuf->size < FBUF_SIZ) {
+
+    if (DEBUG) 
+      fprintf(stderr, "CASE can buffer\n");
     
     return insert_or_send_packet(queue, fbuf, seq, id, psize);
+
+    if (DEBUG) 
+      fprintf(stderr, "CASE can buffer END\n");
 
   }
 
@@ -201,8 +240,13 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
   // end
   
   else {
+
     struct rb_node * first_node = rb_first(&(fbuf->root));
     uint32_t lowest_seq = rb_entry(first_node, struct nfq_flowdata, node)->seq;
+
+    if (DEBUG) {
+      fprintf(stderr, "CASE buffer full, in seq %u, stored lowest seq %u\n", seq, lowest_seq);
+    }
 
     if (lowest_seq <= seq) {
 
@@ -212,6 +256,9 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
     }
 
     else {
+
+      if (DEBUG) 
+        fprintf(stderr, "Verdicted packet %u\n", id);
 
       nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
       fbuf->last_activity = ev_now(EV_A);
@@ -271,12 +318,16 @@ static inline int insert_or_send_packet(struct nfq_q_handle * queue,
     else {
       int ret;
       if (curr->seg_size > seg_size) {
+        if (DEBUG) 
+          fprintf(stderr, "Verdicted packet %u\n", packet_id);
         ret = nfq_set_verdict(queue, packet_id, NF_DROP, 0, NULL);
       }
       else {
         uint32_t oldid = curr->packet_id;
         curr->packet_id = packet_id;
         curr->seg_size =  seg_size;
+        if (DEBUG) 
+          fprintf(stderr, "Verdicted packet %u\n", oldid);
         ret = nfq_set_verdict(queue, oldid, NF_DROP, 0, NULL);
       }
       fbuf->last_activity = ev_now(EV_A);
@@ -306,7 +357,10 @@ static inline int send_packet_at(struct nfq_q_handle * queue,
                                  struct nfq_flowbuf * fbuf, 
                                  struct rb_node * rb_node) 
 {
-  struct flowdata * fdata = rb_entry(rb_node, struct nfq_flowdata, node);
+  struct nfq_flowdata * fdata = rb_entry(rb_node, struct nfq_flowdata, node);
+  
+  if (DEBUG) 
+    fprintf(stderr, "Verdicted packet %u\n", fdata->packet_id);
   int ret = nfq_set_verdict(queue,
                             fdata->packet_id,
                             NF_ACCEPT, 0, NULL);
