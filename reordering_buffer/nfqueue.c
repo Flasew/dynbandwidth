@@ -168,6 +168,7 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
     fbuf->expected_next = seq;
       fbuf->last_activity = ev_now (EV_A);
       ev_init(&fbuf->timer, timer_cb);
+    fbuf->timer.data = fbuf;
       timer_cb(EV_A_ &fbuf->timer, 0);
     }
   }
