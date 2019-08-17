@@ -29,7 +29,7 @@
 
 #define PBUF_SIZ 0xffff
 #define MAX_QL 32768
-#define FBUF_SIZ 512
+#define FBUF_SIZ 256
 #define FBUF_TOUT 1.0
 
 static inline bool before(__u32 seq1, __u32 seq2)

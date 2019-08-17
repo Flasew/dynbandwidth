@@ -168,6 +168,7 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
     fbuf->expected_next = seq;
       fbuf->last_activity = ev_now (EV_A);
       ev_init(&fbuf->timer, timer_cb);
+    fbuf->timer.data = fbuf;
       timer_cb(EV_A_ &fbuf->timer, 0);
     }
   }
@@ -193,8 +194,9 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
     nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
     if (tcp->th_flags & TH_SYN)
       fbuf->expected_next = seq + 1;
-    else
+    else if (seq + psize > fbuf->expected_next)
       fbuf->expected_next = seq + psize;
+
     fbuf->last_activity = ev_now(EV_A);
 
     struct rb_node * node = rb_first(&(fbuf->root));
@@ -275,7 +277,7 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
 
 static void timer_cb (EV_P_ ev_timer *w, int revents) {
   // calculate when the timeout would happen
-  struct nfq_flowbuf * fbuf = (struct nfq_flowbuf *)w->data;
+  struct nfq_flowbuf * fbuf = (struct nfq_flowbuf *)(w->data);
   ev_tstamp after = fbuf->last_activity - ev_now (EV_A) + fbuf->timeout;
  
   // if negative, it means we the timeout already occurred
