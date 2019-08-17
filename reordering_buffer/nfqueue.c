@@ -216,7 +216,7 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
   else if (fbuf->size < FBUF_SIZ) {
 
     if (DEBUG) 
-      fprintf(stderr, "CASE can buffer\n");
+      fprintf(stderr, "CASE can buffer, seq = %u, exp = %u\n", seq, fbuf->expected_next);
     
     return insert_or_send_packet(queue, fbuf, seq, id, psize);
 
@@ -365,7 +365,8 @@ static inline int send_packet_at(struct nfq_q_handle * queue,
                             fdata->packet_id,
                             NF_ACCEPT, 0, NULL);
 
-  fbuf->expected_next = fdata->seq + fdata->seg_size;
+  if (fdata->seq + fdata->seg_size > fbuf->expected_next) 
+    fbuf->expected_next = fdata->seq + fdata->seg_size;
 
   rb_erase(rb_node, &(fbuf->root));
   free(container_of(rb_node, struct nfq_flowdata, node));
