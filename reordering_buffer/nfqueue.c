@@ -125,6 +125,7 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
       fprintf(stderr, "Verdicted packet %u\n", id);
     }
 
+  return  nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
 
   uint16_t sport = ntohs(tcp->th_sport);
   uint16_t dport = ntohs(tcp->th_dport);
