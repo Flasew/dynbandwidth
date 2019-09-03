@@ -27,8 +27,8 @@
 #include <ev.h>
 #include "rbtree.h"
 
-#define PBUF_SIZ 0xffff
-#define MAX_QL 32768
+#define PBUF_SIZ 4194304
+#define MAX_QL 1048756
 #define FBUF_SIZ 256
 #define FBUF_TOUT 1.0
 

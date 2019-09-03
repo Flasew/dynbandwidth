@@ -1,6 +1,6 @@
 #include "nfqueue.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 struct nfq_config nfq;
 struct ev_loop *loop;
@@ -29,9 +29,10 @@ int main(int argc, char * argv[]) {
 
   memset(buffer, 0, PBUF_SIZ);
 
-  while ((len = read(nfq.fd, buffer, PBUF_SIZ)) > 0) {
+  while ((len = read(nfq.fd, buffer, PBUF_SIZ)) >= 0) {
     nfq_handle_packet(nfq.handler, buffer, len);
   }
+  perror("BAD");
 
 
 
@@ -102,6 +103,7 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
 
   struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr(nfad);
   uint32_t id = ntohl(ph->packet_id);
+  return  nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
 
   if (DEBUG) 
     fprintf(stderr, "Received packet with id %u\n", id);
@@ -119,13 +121,10 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
     print_tcphdr((unsigned char *)tcp);
   }
 
-  /*
     if (DEBUG) {
       fprintf(stderr, "Verdicted packet %u\n", id);
     }
 
-  return  nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
-  */
 
   uint16_t sport = ntohs(tcp->th_sport);
   uint16_t dport = ntohs(tcp->th_dport);

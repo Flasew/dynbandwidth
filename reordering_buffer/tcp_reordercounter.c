@@ -1,6 +1,6 @@
 #include "reorder_counter.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 struct rc_config rc;
 
@@ -34,8 +34,13 @@ int main(int argc, char * argv[]) {
     perror("bind: ");
     exit(-1);
   }
+  memset(&rc, 0, sizeof(rc));
 
   if (signal(SIGINT, catch_function) == SIG_ERR) {
+    fputs("An error occurred while setting a signal handler.\n", stderr);
+    return EXIT_FAILURE;
+  }
+  if (signal(SIGTERM, catch_function) == SIG_ERR) {
     fputs("An error occurred while setting a signal handler.\n", stderr);
     return EXIT_FAILURE;
   }
@@ -109,29 +114,16 @@ int rc_handle_packet(uint8_t * data, int len) {
   //     Increment expected_num by 1}
   // end
 
-  if (before(seq, fbuf->expected_next) || seq == fbuf->expected_next) {
+  if (before(seq, fbuf->expected_next) ) {
 
     if (DEBUG) {
-      fprintf(stderr, "CASE seq <= expected, seq = %u, exp = %u\n", seq, fbuf->expected_next);
+      fprintf(stderr, "CASE seq < expected, seq = %u, exp = %u\n", seq, fbuf->expected_next);
     }
 
-    if (tcp->th_flags & TH_SYN)
-      fbuf->expected_next = seq + 1;
-    else
-      fbuf->expected_next = seq + psize;
-
-    struct rb_node * node = rb_first(&(fbuf->root));
-
-    while (node 
-        && (before(rb_entry(node, struct rc_flowdata, node)->seq, fbuf->expected_next) 
-          || rb_entry(node, struct rc_flowdata, node)->seq == fbuf->expected_next)) {
-      
-      send_packet_at(fbuf, node);
-      node = rb_first(&(fbuf->root));
-    }
+    rc.reorder_count++;
 
     if (DEBUG) 
-      fprintf(stderr, "CASE seq <= expected END \n");
+      fprintf(stderr, "CASE seq < expected END \n");
 
     return 1;
   }
@@ -140,15 +132,18 @@ int rc_handle_packet(uint8_t * data, int len) {
   // begin
   //   Store packet in re-sequencing buffer
   // end
-  else if (fbuf->size < FBUF_SIZ) {
+  else {
 
     if (DEBUG) 
-      fprintf(stderr, "CASE can buffer, seq = %u, exp = %u\n", seq, fbuf->expected_next);
+      fprintf(stderr, "CASE seq >= expected, seq = %u, exp = %u\n", seq, fbuf->expected_next);
     
-    return insert_or_send_packet(fbuf, seq, psize);
+    if (tcp->th_flags & TH_SYN)
+      fbuf->expected_next = seq + 1;
+    else
+      fbuf->expected_next = seq + psize;
 
     if (DEBUG) 
-      fprintf(stderr, "CASE can buffer END\n");
+      fprintf(stderr, "CASE seq >= expected END\n");
 
   }
 
@@ -166,6 +161,7 @@ int rc_handle_packet(uint8_t * data, int len) {
   //   end 
   // end
   
+  /*
   else {
 
     struct rb_node * first_node = rb_first(&(fbuf->root));
@@ -186,6 +182,7 @@ int rc_handle_packet(uint8_t * data, int len) {
       fprintf(stderr, "CASE buffer full END\n");
     }
   }
+  */
 
   return -1;
 
@@ -239,8 +236,10 @@ static inline int insert_or_send_packet(struct rc_flowbuf * fbuf,
 }
 
 static void catch_function(int signo) {
-  //FILE * filp = fopen("/root/reorder_count.txt", "w");
-  fprintf(stdout, "%lu", rc.reorder_count);
+
+  FILE * filp = fopen("/root/reorder_count.txt", "w");
+  fprintf(filp, "%lu", rc.reorder_count);
+  fclose(filp);
     
   exit(0);
 }

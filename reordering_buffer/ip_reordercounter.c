@@ -1,4 +1,4 @@
-#include "reorder_counter.h"
+#include "ip_reordercounter.h"
 
 #define DEBUG 1
 
@@ -63,7 +63,7 @@ int rc_handle_packet(uint8_t * data, int len) {
   uint16_t sport = ntohs(tcp->th_sport);
   uint16_t dport = ntohs(tcp->th_dport);
   uint16_t psize = ntohs(ip->tot_len) - ((unsigned int)ip->ihl + tcp->th_off) * 4;
-  uint32_t seq   = ntohl(tcp->th_seq);
+  uint16_t ipid   = ntohs(ip->id);
 
   struct rc_flowbuf * fbuf = NULL;
 
@@ -73,8 +73,7 @@ int rc_handle_packet(uint8_t * data, int len) {
     rc.reorder_buf[sport] = fbuf;
     fbuf->sport = sport; 
     fbuf->dport = dport; 
-    fbuf->root = RB_ROOT;
-    fbuf->expected_next = seq;
+    fbuf->expected_next = ipid+1;
   }
   else {
     struct rc_flowbuf * curr = rc.reorder_buf[sport];
@@ -93,8 +92,7 @@ int rc_handle_packet(uint8_t * data, int len) {
       tail->next = fbuf;
       fbuf->sport = sport; 
       fbuf->dport = dport; 
-      fbuf->root = RB_ROOT;
-      fbuf->expected_next = seq;
+      fbuf->expected_next = ipid + 1;
     }
   }
 
@@ -109,12 +107,15 @@ int rc_handle_packet(uint8_t * data, int len) {
   //     Increment expected_num by 1}
   // end
 
-  if (before(seq, fbuf->expected_next) || seq == fbuf->expected_next) {
+  //if (before(seq, fbuf->expected_next) || seq == fbuf->expected_next) {
+  if (before(ipid, fbuf->expected_next) || ipid == fbuf->expected_next) {
 
     if (DEBUG) {
-      fprintf(stderr, "CASE seq <= expected, seq = %u, exp = %u\n", seq, fbuf->expected_next);
+      fprintf(stderr, "CASE ipid <= expected, id = %u, exp = %u\n", ipid, fbuf->expected_next);
     }
+    fbuf->expected_next++;
 
+    /*
     if (tcp->th_flags & TH_SYN)
       fbuf->expected_next = seq + 1;
     else
@@ -129,9 +130,10 @@ int rc_handle_packet(uint8_t * data, int len) {
       send_packet_at(fbuf, node);
       node = rb_first(&(fbuf->root));
     }
+    */
 
     if (DEBUG) 
-      fprintf(stderr, "CASE seq <= expected END \n");
+      fprintf(stderr, "CASE ipid <= expected END \n");
 
     return 1;
   }
@@ -140,15 +142,18 @@ int rc_handle_packet(uint8_t * data, int len) {
   // begin
   //   Store packet in re-sequencing buffer
   // end
-  else if (fbuf->size < FBUF_SIZ) {
+  else {
 
     if (DEBUG) 
-      fprintf(stderr, "CASE can buffer, seq = %u, exp = %u\n", seq, fbuf->expected_next);
+      fprintf(stderr, "CASE id > exp, id = %u, exp = %u\n", ipid, fbuf->expected_next);
     
-    return insert_or_send_packet(fbuf, seq, psize);
+    rc.reorder_count += (__s16)(fbuf->expected_next - ipid);
+    fbuf->expected_next = ipid + 1;
 
     if (DEBUG) 
-      fprintf(stderr, "CASE can buffer END\n");
+      fprintf(stderr, "CASE id > exp END\n");
+    //return insert_or_send_packet(fbuf, seq, psize);
+
 
   }
 
@@ -166,6 +171,7 @@ int rc_handle_packet(uint8_t * data, int len) {
   //   end 
   // end
   
+  /*
   else {
 
     struct rb_node * first_node = rb_first(&(fbuf->root));
@@ -186,11 +192,13 @@ int rc_handle_packet(uint8_t * data, int len) {
       fprintf(stderr, "CASE buffer full END\n");
     }
   }
+  */
 
   return -1;
 
 }
 
+/*
 
 static inline int insert_or_send_packet(struct rc_flowbuf * fbuf, 
                                         uint32_t seq, 
@@ -229,7 +237,6 @@ static inline int insert_or_send_packet(struct rc_flowbuf * fbuf,
   newdata->seg_size = seg_size;
 
   struct rb_node * currfirst = rb_first(&(fbuf->root));
-  /* Add new_node node and rebalance tree. */
   rb_link_node(&newdata->node, parent, new_node);
   rb_insert_color(&newdata->node, &(fbuf->root));
   rc.reorder_count++;
@@ -237,6 +244,7 @@ static inline int insert_or_send_packet(struct rc_flowbuf * fbuf,
   return 0;
 
 }
+*/
 
 static void catch_function(int signo) {
   //FILE * filp = fopen("/root/reorder_count.txt", "w");
@@ -245,6 +253,7 @@ static void catch_function(int signo) {
   exit(0);
 }
 
+/*
 static inline int send_packet_at( struct rc_flowbuf * fbuf, 
                                  struct rb_node * rb_node) 
 {
@@ -257,6 +266,7 @@ static inline int send_packet_at( struct rc_flowbuf * fbuf,
   fbuf->size--;
   return 0;
 }
+*/
 
 static void print_iphdr(unsigned char * buffer) {
 
