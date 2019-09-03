@@ -15,12 +15,12 @@ done = function(summary, latency, requests)
   local final = {}
   final["summary"] = summary
   final["latency"] = {}
-  final["latency"]["min"] = latency.min
-  final["latency"]["max"] = latency.max
   final["latency"]["avg"] = latency.mean
   final["latency"]["stddev"] = latency.stdev
-  final["latency"]["q1"] = latency:percentile(25)
-  final["latency"]["q3"] = latency:percentile(75)
+  for i=0, 10000, 1 do 
+    final["latency"][tostring(i)] = latency:percentile(i/100)
+  end
+  final["latency"]["10000"] = latency.max
   jreport = json.encode(final)
   file = io.open("temp", "w")
   io.output(file)

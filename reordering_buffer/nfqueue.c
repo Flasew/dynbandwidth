@@ -1,6 +1,6 @@
 #include "nfqueue.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 struct nfq_config nfq;
 struct ev_loop *loop;
@@ -119,13 +119,11 @@ int nfq_cb(struct nfq_q_handle *queue, struct nfgenmsg *nfmsg, struct nfq_data *
     print_tcphdr((unsigned char *)tcp);
   }
 
-  /*
     if (DEBUG) {
       fprintf(stderr, "Verdicted packet %u\n", id);
     }
 
   return  nfq_set_verdict(queue, id, NF_ACCEPT, 0, NULL);
-  */
 
   uint16_t sport = ntohs(tcp->th_sport);
   uint16_t dport = ntohs(tcp->th_dport);
